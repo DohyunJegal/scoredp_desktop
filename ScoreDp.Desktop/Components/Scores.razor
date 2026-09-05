@@ -1,0 +1,509 @@
+@page "/scores"
+@using System.Globalization
+@using Microsoft.AspNetCore.Components
+@using Microsoft.EntityFrameworkCore
+@using ScoreDp.Desktop.Data
+@using ScoreDp.Desktop.Support
+@inject ScoreDpDbContext Db
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>기록 - scoredp</PageTitle>
+
+<div class="flex flex-col gap-6">
+    <h1 class="text-2xl font-bold">기록</h1>
+
+    <div class="flex gap-2 items-center">
+        <input type="text" value="@_search" @oninput="e => _search = e.Value?.ToString() ?? string.Empty"
+               @onkeydown="@(e => { if (e.Key == "Enter") HandleSearch(); })" placeholder="IIDX ID"
+               class="px-3 py-1.5 rounded border border-white/20 bg-white/5 text-sm w-48 focus:outline-none focus:border-indigo-400" />
+        <button @onclick="HandleSearch"
+                class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-sm transition-colors cursor-pointer">조회</button>
+    </div>
+
+    @if (!string.IsNullOrEmpty(Id))
+    {
+        <div class="flex gap-2 flex-wrap items-center">
+            @foreach (var lv in Levels)
+            {
+                <button @onclick="() => SetLevelAsync(lv)"
+                        class="px-3 py-1 rounded text-sm border transition-colors cursor-pointer @(_level == lv ? "bg-indigo-600 border-indigo-600" : "border-white/20 hover:border-white/40")">
+                    ☆@lv
+                </button>
+            }
+            <label class="flex items-center gap-2 cursor-pointer select-none text-sm text-white/60">
+                <input type="checkbox" class="sr-only" checked="@_sortByClear"
+                       @onchange="() => _sortByClear = !_sortByClear" />
+                <span
+                    class="relative inline-block w-9 h-5 rounded-full transition-colors duration-200 @(_sortByClear ? "bg-indigo-600" : "bg-white/20")">
+                    <span
+                    class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 @(_sortByClear ? "translate-x-4" : "translate-x-0")"></span>
+                </span>
+                램프순
+            </label>
+            <button @onclick="CaptureAsync" title="이미지 저장"
+                    class="flex items-center gap-1 p-1 text-sm text-white/40 hover:text-white/60 transition-colors cursor-pointer">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
+                     stroke="currentColor" class="size-5">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                          d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                          d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z" />
+                </svg>
+                캡처
+            </button>
+        </div>
+    }
+
+    @if (_capturing)
+    {
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+            <div class="w-10 h-10 border-4 border-white/20 border-t-white rounded-full animate-spin"></div>
+        </div>
+    }
+
+    @if (_loading)
+    {
+        <p class="text-white/40 text-sm">데이터를 가져오는 중...</p>
+    }
+    @if (_error != null)
+    {
+        <p class="text-red-400 text-sm">@_error</p>
+    }
+
+    @if (!_loading && _error == null && !string.IsNullOrEmpty(Id))
+    {
+        var groups = GroupedScores();
+
+        if (groups.Count == 0)
+        {
+            <p class="text-white/40 text-sm">스코어 데이터가 비어있어요.</p>
+        }
+        else
+        {
+            <div id="score-capture" class="flex flex-col gap-6">
+                @if (_djName != null)
+                {
+                    <div class="text-sm font-medium text-white/60">DJ @_djName (@FormatId(Id)) / ☆@_level</div>
+                }
+
+                <div class="flex gap-3 flex-wrap text-xs text-white/50">
+                    @foreach (var (ct, label) in ClearLabel.OrderByDescending(kv => kv.Key))
+                    {
+                        <span class="flex items-center gap-1">
+                            <span class="inline-block w-2 h-2 rounded-sm" style="background:@ClearColor[ct]"></span>
+                            @label
+                        </span>
+                    }
+                </div>
+
+                <div class="flex text-xs font-mono rounded overflow-hidden max-w-md">
+                    @{
+                        var noPlayCount = _scores.Count(s => s.ClearType == 0);
+                        var played = _scores.Count - noPlayCount;
+                    }
+                    @if (played == 0)
+                    {
+                        <div class="flex items-center justify-center py-0.5 flex-1 bg-white/10 text-white/50">@noPlayCount</div>
+                    }
+                    else
+                    {
+                        @foreach (var (ct, label) in ClearLabel.OrderByDescending(kv => kv.Key))
+                        {
+                            var count = _scores.Count(s => s.ClearType == ct);
+                            <div class="flex items-center justify-center py-0.5 overflow-hidden whitespace-nowrap min-w-[1.5rem]"
+                                 style="background:@ClearColor[ct];color:#111;flex-grow:@count;flex-basis:0"
+                                 title="@($"{label}: {count}")">
+                                @count
+                            </div>
+                        }
+                        <div class="flex items-center justify-center px-2 py-0.5 shrink-0 bg-white/10 text-white/50">@noPlayCount
+                        </div>
+                    }
+                </div>
+
+                @foreach (var (lvKey, items) in groups)
+                {
+                    <section class="flex flex-col gap-2">
+                        <h2
+                            class="sticky top-0 z-10 bg-[#0f0f1a]/90 backdrop-blur text-sm font-semibold text-indigo-300 border-b border-white/10 py-1">
+                            ☆@lvKey <span class="ml-2 text-white/30 font-normal">@(items.Count)곡</span>
+                        </h2>
+                        <div class="song-grid grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-1.5">
+                            @foreach (var item in items)
+                            {
+                                var chartStyle = SongStyle.GetChartStyle(item.Chart);
+                                var titleColor = SongStyle.GetTitleColor(item.Chart, item.VersionId);
+                                var barColor = ClearColor.GetValueOrDefault(item.ClearType);
+                                <div class="flex flex-row border border-white/10 rounded overflow-hidden h-12 sm:h-14 active:opacity-70 cursor-pointer"
+                                     @onclick="() => OpenEditModal(item)">
+                                    <div class="flex flex-col justify-between p-1 sm:p-1.5 flex-1 min-w-0">
+                                        <span class="text-[10px] sm:text-xs leading-tight line-clamp-2" style="color:@titleColor">
+                                            @chartStyle.Prefix@item.Title
+                                        </span>
+                                        <div class="flex justify-between items-end">
+                                            @if (item.ScoreValue > 0)
+                                            {
+                                                <span class="text-[8px] sm:text-[10px] text-white/50 font-mono">@item.DjLevel
+                                                    @item.ScoreValue.ToString("N0")</span>
+                                                }
+                                                @if (_optionMap.TryGetValue(item.SongId, out var opt) && (opt.Flip != 0 || opt.LeftArr != 0
+                                || opt.RightArr != 0))
+                                                {
+                                                    <span
+                                                    class="text-[8px] sm:text-[10px] text-indigo-300/70 font-mono ml-auto">@FormatOption(opt)</span>
+                                                }
+                                            </div>
+                                        </div>
+                                        @if (item.ClearType > 0)
+                                        {
+                                            <div class="w-2 shrink-0" style="background:@barColor"
+                                                 title="@ClearLabel.GetValueOrDefault(item.ClearType)"></div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        </section>
+                    }
+                </div>
+            }
+        }
+    </div>
+
+    @if (_editItem is not null)
+    {
+        var chartStyle = SongStyle.GetChartStyle(_editItem.Chart);
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60" @onclick="CloseEditModal">
+            <div class="bg-zinc-900 border border-white/10 rounded-xl p-5 w-96 flex flex-col gap-4 max-h-[90vh] overflow-y-auto"
+                 @onclick:stopPropagation="true">
+                <div class="flex justify-between items-start">
+                    <div class="flex flex-col gap-0.5">
+                        <span class="text-xs font-semibold leading-snug line-clamp-2"
+                              style="color:@chartStyle.Color">@chartStyle.Prefix@_editItem.Title</span>
+                        <span class="text-xs text-white/40">
+                            ☆@_editItem.Level@(_editItem.UnofficialLevel != null ? $" (☆{_editItem.UnofficialLevel:F1})" : "")
+                        </span>
+                    </div>
+                    <button @onclick="CloseEditModal"
+                            class="text-white/40 hover:text-white/70 ml-3 shrink-0 cursor-pointer">✕</button>
+                </div>
+
+                <div class="flex flex-col gap-1.5">
+                    <span class="text-white/50 text-xs">클리어 타입</span>
+                    <div class="flex flex-wrap gap-1.5">
+                        @foreach (var (value, label) in ClearTypeChoices)
+                        {
+                            <button @onclick="() => _editClearType = value"
+                                    class="px-2 py-1 text-xs rounded border transition-colors cursor-pointer @(_editClearType == value ? "bg-indigo-600 border-indigo-600" : "border-white/20 hover:border-white/40")">
+                                @label
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                <div class="flex flex-col gap-1.5">
+                    <span class="text-white/50 text-xs">랭크</span>
+                    <div class="flex flex-wrap gap-1.5">
+                        @foreach (var label in DjLevelChoices)
+                        {
+                            <button @onclick="() => _editDjLevel = label"
+                                    class="px-2.5 py-1 text-xs rounded border transition-colors cursor-pointer @(_editDjLevel == label ? "bg-indigo-600 border-indigo-600" : "border-white/20 hover:border-white/40")">
+                                @(label == "---" ? "-" : label)
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                <label class="flex flex-col gap-1.5">
+                    <span class="text-white/50 text-xs">점수</span>
+                    <input type="number" min="0" value="@_editScore"
+                           @oninput="e => _editScore = int.TryParse(e.Value?.ToString(), out var v) ? v : 0"
+                           class="px-3 py-1.5 rounded border border-white/20 bg-white/5 focus:outline-none focus:border-indigo-400 font-mono text-sm" />
+                </label>
+
+                <div class="flex flex-col gap-1.5">
+                    <span class="text-white/50 text-xs">배치</span>
+                    <div class="grid grid-cols-3 gap-x-2 gap-y-1.5">
+                        @foreach (var h in new[] { "플립", "좌측", "우측" })
+                        {
+                            <span class="text-white/50 text-xs text-center pb-0.5">@h</span>
+                        }
+
+                        <button @onclick="() => _editFlip = 0"
+                                class="py-1.5 text-xs rounded border transition-colors cursor-pointer w-full @(_editFlip == 0 ? "bg-indigo-600 border-indigo-600" : "border-white/20 hover:border-white/40")">None</button>
+                        <button @onclick="() => _editLeftArr = 0"
+                                class="py-1.5 text-xs rounded border transition-colors cursor-pointer w-full @(_editLeftArr == 0 ? "bg-indigo-600 border-indigo-600" : "border-white/20 hover:border-white/40")">None</button>
+                        <button @onclick="() => _editRightArr = 0"
+                                class="py-1.5 text-xs rounded border transition-colors cursor-pointer w-full @(_editRightArr == 0 ? "bg-indigo-600 border-indigo-600" : "border-white/20 hover:border-white/40")">None</button>
+
+                        <button @onclick="() => _editFlip = 1"
+                                class="py-1.5 text-xs rounded border transition-colors cursor-pointer w-full @(_editFlip == 1 ? "bg-indigo-600 border-indigo-600" : "border-white/20 hover:border-white/40")">Flip</button>
+                        <button @onclick="() => _editLeftArr = 1"
+                                class="py-1.5 text-xs rounded border transition-colors cursor-pointer w-full @(_editLeftArr == 1 ? "bg-indigo-600 border-indigo-600" : "border-white/20 hover:border-white/40")">Mirror</button>
+                        <button @onclick="() => _editRightArr = 1"
+                                class="py-1.5 text-xs rounded border transition-colors cursor-pointer w-full @(_editRightArr == 1 ? "bg-indigo-600 border-indigo-600" : "border-white/20 hover:border-white/40")">Mirror</button>
+
+                        @for (var i = 2; i <= 4; i++)
+                        {
+                            var arrIdx = i;
+                            <div></div>
+                            <button @onclick="() => _editLeftArr = arrIdx"
+                                    class="py-1.5 text-xs rounded border transition-colors cursor-pointer w-full @(_editLeftArr == arrIdx ? "bg-indigo-600 border-indigo-600" : "border-white/20 hover:border-white/40")">@ArrOptionLabel[arrIdx]</button>
+                            <button @onclick="() => _editRightArr = arrIdx"
+                                    class="py-1.5 text-xs rounded border transition-colors cursor-pointer w-full @(_editRightArr == arrIdx ? "bg-indigo-600 border-indigo-600" : "border-white/20 hover:border-white/40")">@ArrOptionLabel[arrIdx]</button>
+                        }
+                    </div>
+                </div>
+
+                <div class="flex gap-2 justify-end">
+                    <button @onclick="CloseEditModal"
+                            class="px-3 py-1.5 text-sm text-white/50 hover:text-white/80 cursor-pointer">취소</button>
+                    <button @onclick="SaveEditAsync" disabled="@_saving"
+                            class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded text-sm transition-colors cursor-pointer">
+                        @(_saving ? "저장 중..." : "저장")
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+
+@code {
+    private static readonly int[] Levels = [12, 11, 10, 9, 8];
+    private static readonly StringComparer JaComparer = StringComparer.Create(CultureInfo.GetCultureInfo("ja-JP"), false);
+    private static readonly string[] ArrLabel = ["-", "M", "R", "RR", "SR"];
+    private static readonly string[] ArrOptionLabel = ["None", "Mirror", "Random", "R-Random", "S-Random"];
+    private static readonly string[] DjLevelChoices = ["---", "F", "E", "D", "C", "B", "A", "AA", "AAA"];
+
+    private static readonly (int Value, string Label)[] ClearTypeChoices =
+    [
+        (0, "NO PLAY"), (1, "FAILED"), (2, "ASSIST"), (3, "EASY"),
+        (4, "CLEAR"), (5, "HARD"), (6, "EX HARD"), (7, "FULL COMBO"),
+    ];
+
+    private static readonly Dictionary<int, string> ClearLabel = new()
+    {
+        [7] = "FULL COMBO",
+        [6] = "EX HARD",
+        [5] = "HARD",
+        [4] = "CLEAR",
+        [3] = "EASY",
+        [2] = "ASSIST",
+        [1] = "FAILED",
+    };
+
+    private static readonly Dictionary<int, string> ClearColor = new()
+    {
+        [7] = "linear-gradient(to bottom, #7bdcff, #f1fbfb)",
+        [6] = "#fbfb70",
+        [5] = "#fffffd",
+        [4] = "#2efffd",
+        [3] = "#afe14f",
+        [2] = "#d35ad3",
+        [1] = "#808080",
+    };
+
+    private record ScoreRow(int SongId, string Title, int Level, string Chart, double? UnofficialLevel,
+        int? VersionId, int ClearType, int ScoreValue, string DjLevel);
+
+    [SupplyParameterFromQuery] public string? Id { get; set; }
+
+    private string _search = string.Empty;
+    private string? _loadedId;
+    private int _level = 12;
+    private bool _sortByClear;
+    private bool _loading;
+    private string? _error;
+    private string? _djName;
+    private Models.User? _user;
+    private List<ScoreRow> _scores = [];
+    private Dictionary<int, Models.Option> _optionMap = [];
+
+    private ScoreRow? _editItem;
+    private int _editClearType;
+    private string _editDjLevel = "---";
+    private int _editScore;
+    private int _editFlip;
+    private int _editLeftArr;
+    private int _editRightArr;
+    private bool _saving;
+    private bool _capturing;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrEmpty(Id) || Id == _loadedId) return;
+        _loadedId = Id;
+        _search = Id;
+        await LoadUserAsync();
+        await LoadScoresAsync();
+    }
+
+    private async Task LoadUserAsync()
+    {
+        var iidxId = Id!.Replace("-", "");
+        _user = await Db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.IidxId == iidxId);
+        if (_user is null)
+        {
+            _error = "사용자를 찾을 수 없어요.";
+            _djName = null;
+            _optionMap = [];
+            return;
+        }
+        _djName = _user.DjName;
+        _optionMap = await Db.Options.AsNoTracking()
+            .Where(o => o.UserId == _user.Id)
+            .ToDictionaryAsync(o => o.SongId);
+    }
+
+    private async Task SetLevelAsync(int lv)
+    {
+        _level = lv;
+        await LoadScoresAsync();
+    }
+
+    private async Task LoadScoresAsync()
+    {
+        if (_user is null) return;
+        _loading = true;
+        _error = null;
+        StateHasChanged();
+
+        var songQuery = Db.Songs.AsNoTracking().Where(s => s.UnofficialLevel != null);
+        songQuery = songQuery.Where(s => s.Level == _level);
+        var songs = await songQuery.OrderByDescending(s => s.UnofficialLevel).ThenBy(s => s.Title).ToListAsync();
+
+        var userScores = new Dictionary<int, Models.Score>();
+        foreach (var sc in await Db.Scores.AsNoTracking().Where(sc => sc.UserId == _user.Id).ToListAsync())
+        {
+            userScores[sc.SongId] = sc;
+        }
+
+        _scores = songs.Select(song =>
+        {
+            userScores.TryGetValue(song.Id, out var sc);
+            return new ScoreRow(song.Id, song.Title, song.Level, song.Chart, song.UnofficialLevel, song.VersionId,
+                sc?.ClearType ?? 0, sc?.ScoreValue ?? 0, sc?.DjLevel ?? "---");
+        }).ToList();
+
+        _loading = false;
+    }
+
+    private List<(string Key, List<ScoreRow> Items)> GroupedScores()
+    {
+        var groups = _scores
+            .GroupBy(s => s.UnofficialLevel is { } u ? u.ToString("F1") : "?")
+            .Select(g => (Key: g.Key, Items: (_sortByClear
+                ? g.OrderByDescending(x => x.ClearType).ThenBy(x => x.Title, JaComparer)
+                : g.AsEnumerable()).ToList()))
+            .OrderByDescending(g => g.Key == "?" ? double.MinValue : double.Parse(g.Key))
+            .ToList();
+        return groups;
+    }
+
+    private static string FormatOption(Models.Option opt)
+    {
+        var flip = opt.Flip != 0 ? "F " : "";
+        return $"{flip}{ArrLabel[opt.LeftArr]}/{ArrLabel[opt.RightArr]}";
+    }
+
+    private static string FormatId(string id) =>
+        id.Length == 8 ? $"{id[..4]}-{id[4..]}" : id;
+
+    private void HandleSearch()
+    {
+        var id = _search.Trim().Replace("-", "");
+        if (string.IsNullOrEmpty(id)) return;
+        Nav.NavigateTo($"/scores?id={id}");
+    }
+
+    private async Task CaptureAsync()
+    {
+        _capturing = true;
+        StateHasChanged();
+        try
+        {
+            await JS.InvokeVoidAsync("scoredp.captureScoreGrid", "score-capture", $"scoredp_{Id}_{_level}.png");
+        }
+        finally
+        {
+            _capturing = false;
+        }
+    }
+
+    private void OpenEditModal(ScoreRow item)
+    {
+        _editItem = item;
+        _editClearType = item.ClearType;
+        _editDjLevel = item.DjLevel;
+        _editScore = item.ScoreValue;
+        if (_optionMap.TryGetValue(item.SongId, out var opt))
+        {
+            _editFlip = opt.Flip;
+            _editLeftArr = opt.LeftArr;
+            _editRightArr = opt.RightArr;
+        }
+        else
+        {
+            _editFlip = 0;
+            _editLeftArr = 0;
+            _editRightArr = 0;
+        }
+    }
+
+    private void CloseEditModal() => _editItem = null;
+
+    private async Task SaveEditAsync()
+    {
+        if (_editItem is null || _user is null) return;
+        _saving = true;
+
+        var score = await Db.Scores.FirstOrDefaultAsync(s => s.UserId == _user.Id && s.SongId == _editItem.SongId);
+        if (score is null)
+        {
+            score = new Models.Score { UserId = _user.Id, SongId = _editItem.SongId };
+            Db.Scores.Add(score);
+        }
+        score.ClearType = _editClearType;
+        score.ScoreValue = _editScore;
+        score.DjLevel = _editDjLevel;
+        score.UpdatedAt = DateTime.UtcNow;
+
+        var option = await Db.Options.FirstOrDefaultAsync(o => o.UserId == _user.Id && o.SongId == _editItem.SongId);
+        var allDefault = _editFlip == 0 && _editLeftArr == 0 && _editRightArr == 0;
+        if (allDefault)
+        {
+            if (option is not null) Db.Options.Remove(option);
+            _optionMap.Remove(_editItem.SongId);
+        }
+        else if (option is not null)
+        {
+            option.Flip = _editFlip;
+            option.LeftArr = _editLeftArr;
+            option.RightArr = _editRightArr;
+            _optionMap[_editItem.SongId] = option;
+        }
+        else
+        {
+            option = new Models.Option
+            {
+                UserId = _user.Id,
+                SongId = _editItem.SongId,
+                Flip = _editFlip,
+                LeftArr = _editLeftArr,
+                RightArr = _editRightArr
+            };
+            Db.Options.Add(option);
+            _optionMap[_editItem.SongId] = option;
+        }
+
+        await Db.SaveChangesAsync();
+
+        var idx = _scores.FindIndex(s => s.SongId == _editItem.SongId);
+        if (idx >= 0)
+        {
+            _scores[idx] = _scores[idx] with { ClearType = _editClearType, ScoreValue = _editScore, DjLevel = _editDjLevel };
+        }
+
+        _saving = false;
+        _editItem = null;
+    }
+}

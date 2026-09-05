@@ -1,0 +1,105 @@
+@page "/tier"
+@using Microsoft.EntityFrameworkCore
+@using ScoreDp.Desktop.Data
+@using ScoreDp.Desktop.Support
+@inject ScoreDpDbContext Db
+@inject IJSRuntime JS
+
+<PageTitle>서열표 - scoredp</PageTitle>
+
+<div class="flex flex-col gap-6">
+    @if (_copiedToast)
+    {
+        <div
+            class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-white/10 backdrop-blur text-white text-xs px-4 py-2 rounded-full pointer-events-none">
+            곡명이 복사되었어요
+        </div>
+    }
+
+    <h1 class="text-2xl font-bold">서열표</h1>
+
+    <div class="flex gap-2 flex-wrap">
+        @foreach (var lv in Levels)
+        {
+            <button @onclick="() => SetLevelAsync(lv)"
+                    class="px-3 py-1 rounded text-sm border transition-colors @(_level == lv ? "bg-indigo-600 border-indigo-600" : "border-white/20 hover:border-white/40")">
+                ☆@lv
+            </button>
+        }
+    </div>
+
+    @if (_loading)
+    {
+        <p class="text-white/40 text-sm">데이터를 가져오는 중...</p>
+    }
+
+    @foreach (var (lvKey, items) in Groups())
+    {
+        <section class="flex flex-col gap-2">
+            <h2
+                class="sticky top-0 z-10 bg-[#0f0f1a]/90 backdrop-blur text-sm font-semibold text-indigo-300 border-b border-white/10 py-1">
+                ☆@lvKey <span class="ml-2 text-white/30 font-normal">@(items.Count)곡</span>
+            </h2>
+            <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-1.5">
+                @foreach (var item in items)
+                {
+                    var style = SongStyle.GetChartStyle(item.Chart);
+                    var color = SongStyle.GetTitleColor(item.Chart, item.VersionId);
+                    <div class="flex items-center p-1 sm:p-2 border border-white/10 rounded h-10 sm:h-12 min-w-0 active:opacity-70 cursor-pointer"
+                         @onclick="() => CopyAsync(style.Prefix + item.Title)">
+                        <span class="text-[10px] sm:text-xs leading-tight line-clamp-2" style="color:@color">
+                            @style.Prefix@item.Title
+                        </span>
+                    </div>
+                }
+            </div>
+        </section>
+    }
+</div>
+
+@code {
+    private static readonly int[] Levels = [12, 11, 10, 9, 8];
+
+    private record SongItem(string Title, string Chart, int Level, double? UnofficialLevel, int? VersionId);
+
+    private int _level = 12;
+    private bool _loading;
+    private List<SongItem> _songs = [];
+    private bool _copiedToast;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task SetLevelAsync(int lv)
+    {
+        _level = lv;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        _songs = await Db.Songs.AsNoTracking()
+            .Where(s => s.UnofficialLevel != null && s.Level == _level)
+            .OrderByDescending(s => s.UnofficialLevel).ThenBy(s => s.Title)
+            .Select(s => new SongItem(s.Title, s.Chart, s.Level, s.UnofficialLevel, s.VersionId))
+            .ToListAsync();
+        _loading = false;
+    }
+
+    private List<(string Key, List<SongItem> Items)> Groups() =>
+        _songs.GroupBy(s => s.UnofficialLevel is { } u ? u.ToString("F1") : "?")
+              .Select(g => (g.Key, g.ToList()))
+              .OrderByDescending(g => g.Key == "?" ? double.MinValue : double.Parse(g.Key))
+              .ToList();
+
+    private async Task CopyAsync(string title)
+    {
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", title.Trim());
+        _copiedToast = true;
+        StateHasChanged();
+        await Task.Delay(1500);
+        _copiedToast = false;
+        StateHasChanged();
+    }
+}

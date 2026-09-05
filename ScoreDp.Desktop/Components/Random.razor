@@ -1,0 +1,162 @@
+@page "/random"
+@using Microsoft.EntityFrameworkCore
+@using ScoreDp.Desktop.Data
+@using ScoreDp.Desktop.Support
+@inject ScoreDpDbContext Db
+
+<PageTitle>랜덤 - scoredp</PageTitle>
+
+<div class="flex flex-col gap-6">
+    <h1 class="text-2xl font-bold">랜덤</h1>
+
+    <div class="flex flex-col gap-3">
+        <div class="flex items-center gap-2 flex-wrap">
+            <div class="flex items-center gap-2">
+                <select class="@SelectCls" value="@_fromLevel"
+                        @onchange="e => OnFromLevelChanged(int.Parse(e.Value!.ToString()!))">
+                    @foreach (var lv in Levels)
+                    {
+                        <option value="@lv">☆@lv</option>
+                    }
+                </select>
+                <select class="@SelectCls" value="@_fromUnofficial" disabled="@(_fromOptions.Count == 0)"
+                        @onchange="e => _fromUnofficial = double.Parse(e.Value!.ToString()!)">
+                    @foreach (var v in _fromOptions)
+                    {
+                        <option value="@v">@v.ToString("F1")</option>
+                    }
+                </select>
+            </div>
+
+            <span class="text-white/40">-</span>
+
+            <div class="flex items-center gap-2">
+                <select class="@SelectCls" value="@_toLevel"
+                        @onchange="e => OnToLevelChanged(int.Parse(e.Value!.ToString()!))">
+                    @foreach (var lv in Levels)
+                    {
+                        <option value="@lv">☆@lv</option>
+                    }
+                </select>
+                <select class="@SelectCls" value="@_toUnofficial" disabled="@(_toOptions.Count == 0)"
+                        @onchange="e => _toUnofficial = double.Parse(e.Value!.ToString()!)">
+                    @foreach (var v in _toOptions)
+                    {
+                        <option value="@v">@v.ToString("F1")</option>
+                    }
+                </select>
+            </div>
+
+            <button @onclick="PickAsync" disabled="@(_picking || _fromUnofficial is null || _toUnofficial is null)"
+                    class="px-5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed rounded text-sm font-semibold transition-colors">
+                @(_picking ? "뽑는 중" : "뽑기")
+            </button>
+        </div>
+
+        @if (_error != null)
+        {
+            <p class="text-sm text-red-400">@_error</p>
+        }
+    </div>
+
+    @if (_result != null)
+    {
+        var style = SongStyle.GetChartStyle(_result.Chart);
+        <div class="border border-indigo-500/40 rounded-lg p-6 flex flex-col gap-3 bg-indigo-950/20">
+            <p class="text-2xl font-bold leading-tight" style="color:@style.Color">@style.Prefix@_result.Title</p>
+            <div class="flex gap-3 text-sm text-white/50">
+                @if (_result.UnofficialLevel != null)
+                {
+                    <span>☆@_result.UnofficialLevel?.ToString("F1")</span>
+                }
+                <span>(☆@_result.Level @_result.Chart)</span>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private const string SelectCls = "bg-[#0f0f1a] border border-white/20 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-indigo-500";
+    private static readonly int[] Levels = [8, 9, 10, 11, 12];
+
+    private record SongItem(string Title, string Chart, int Level, double? UnofficialLevel);
+
+    private Dictionary<int, List<double>> _allOptions = new();
+    private int _fromLevel = 12;
+    private List<double> _fromOptions = [];
+    private double? _fromUnofficial;
+
+    private int _toLevel = 12;
+    private List<double> _toOptions = [];
+    private double? _toUnofficial;
+
+    private SongItem? _result;
+    private string? _error;
+    private bool _picking;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var rows = await Db.Songs.AsNoTracking()
+            .Where(s => s.UnofficialLevel != null)
+            .Select(s => new { s.Level, s.UnofficialLevel })
+            .Distinct()
+            .OrderBy(s => s.Level).ThenBy(s => s.UnofficialLevel)
+            .ToListAsync();
+
+        _allOptions = rows.GroupBy(r => r.Level)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.UnofficialLevel!.Value).ToList());
+
+        _fromOptions = _allOptions.GetValueOrDefault(_fromLevel, []);
+        _toOptions = _allOptions.GetValueOrDefault(_toLevel, []);
+        _fromUnofficial = _fromOptions.Count > 0 ? _fromOptions[0] : null;
+        _toUnofficial = _toOptions.Count > 0 ? _toOptions[^1] : null;
+    }
+
+    private void OnFromLevelChanged(int lv)
+    {
+        _fromLevel = lv;
+        _fromOptions = _allOptions.GetValueOrDefault(lv, []);
+        _fromUnofficial = _fromOptions.Contains(_fromUnofficial ?? double.NaN) ? _fromUnofficial
+            : (_fromOptions.Count > 0 ? _fromOptions[0] : null);
+    }
+
+    private void OnToLevelChanged(int lv)
+    {
+        _toLevel = lv;
+        _toOptions = _allOptions.GetValueOrDefault(lv, []);
+        _toUnofficial = _toOptions.Contains(_toUnofficial ?? double.NaN) ? _toUnofficial
+            : (_toOptions.Count > 0 ? _toOptions[^1] : null);
+    }
+
+    private async Task PickAsync()
+    {
+        if (_fromUnofficial is null || _toUnofficial is null) return;
+        _picking = true;
+        _error = null;
+
+        var (fl, fu, tl, tu) = (_fromLevel, _fromUnofficial.Value, _toLevel, _toUnofficial.Value);
+        if (fl > tl || (fl == tl && fu > tu))
+        {
+            (fl, fu, tl, tu) = (tl, tu, fl, fu);
+        }
+
+        var candidates = await Db.Songs.AsNoTracking()
+            .Where(s => s.UnofficialLevel != null
+                && (s.Level > fl || (s.Level == fl && s.UnofficialLevel >= fu))
+                && (s.Level < tl || (s.Level == tl && s.UnofficialLevel <= tu)))
+            .Select(s => new SongItem(s.Title, s.Chart, s.Level, s.UnofficialLevel))
+            .ToListAsync();
+
+        if (candidates.Count == 0)
+        {
+            _error = "해당 범위에 곡이 없습니다";
+            _result = null;
+        }
+        else
+        {
+            _error = null;
+            _result = candidates[System.Random.Shared.Next(candidates.Count)];
+        }
+        _picking = false;
+    }
+}

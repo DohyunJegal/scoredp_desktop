@@ -1,0 +1,72 @@
+@page "/"
+@using ScoreDp.Desktop.Data
+@using ScoreDp.Desktop.Support
+@inject ScoreDpDbContext Db
+
+<PageTitle>scoredp</PageTitle>
+
+<div class="flex flex-col gap-10 max-w-xl">
+    <section>
+        <h1 class="text-3xl font-bold mb-2">
+            score<span class="text-indigo-400">dp</span>
+        </h1>
+        <p class="text-white/60">beatmania IIDX DP 서열표 기록 서비스</p>
+    </section>
+
+    <section class="flex flex-col gap-3">
+        <h2 class="text-lg font-semibold">데이터 기록 방법</h2>
+        <ol class="list-decimal list-inside flex flex-col gap-2 text-sm text-white/80 leading-relaxed">
+            <li>사용자 탭에서 사용자를 추가해주세요.</li>
+            <li>사용자를 클릭하거나, 기록 탭에서 IIDX ID를 입력하여 이동합니다.</li>
+            <li>노래 카드를 클릭하여 클리어 타입, 랭크, 점수, 배치를 입력하여 데이터를 저장합니다.</li>
+        </ol>
+    </section>
+
+    <section class="flex flex-col gap-3">
+        <h2 class="text-lg font-semibold">참고</h2>
+        <a href="https://zasa.sakura.ne.jp/dp/" target="_blank" class="text-indigo-400">DP 비공식 난이도표 사이트</a>
+    </section>
+
+    <section class="flex flex-col gap-3">
+        <h2 class="text-lg font-semibold">서열표 동기화</h2>
+        <p class="text-sm text-white/60">zasa 비공식 난이도표에서 최신 정보를 가져와 반영합니다.<br />인터넷 연결이 필요해요.</p>
+        <button @onclick="SyncZasaAsync" disabled="@_syncing"
+                class="self-start px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded text-sm transition-colors cursor-pointer">
+            @(_syncing ? "동기화 중..." : "동기화")
+        </button>
+        @if (_syncResult != null)
+        {
+            <p class="text-sm text-white/60">@_syncResult</p>
+        }
+        @if (_syncError != null)
+        {
+            <p class="text-sm text-red-400">@_syncError</p>
+        }
+    </section>
+</div>
+
+@code {
+    private bool _syncing;
+    private string? _syncResult;
+    private string? _syncError;
+
+    private async Task SyncZasaAsync()
+    {
+        _syncing = true;
+        _syncResult = null;
+        _syncError = null;
+        try
+        {
+            var (updated, added) = await ZasaSync.SyncAsync(Db);
+            _syncResult = $"완료: {added}개 추가, {updated}개 갱신";
+        }
+        catch (Exception ex)
+        {
+            _syncError = $"동기화 실패: {ex.Message}";
+        }
+        finally
+        {
+            _syncing = false;
+        }
+    }
+}

@@ -1,0 +1,185 @@
+@page "/users"
+@using Microsoft.EntityFrameworkCore
+@using ScoreDp.Desktop.Data
+@inject ScoreDpDbContext Db
+@inject IJSRuntime JS
+
+<PageTitle>사용자 - scoredp</PageTitle>
+
+<div class="flex flex-col gap-6">
+    <h1 class="text-2xl font-bold">사용자</h1>
+
+    <div class="flex items-center gap-2">
+        <input type="text" value="@_query" @oninput="e => _query = e.Value?.ToString() ?? string.Empty"
+               placeholder="닉네임 또는 IIDX ID 검색"
+               class="px-3 py-1.5 rounded border border-white/20 bg-white/5 text-sm w-64 focus:outline-none focus:border-indigo-400" />
+        <button @onclick="OpenAddModal" title="사용자 추가"
+                class="shrink-0 w-8 h-8 flex items-center justify-center rounded border border-white/20 bg-white/5 hover:bg-white/10 text-lg leading-none transition-colors cursor-pointer">
+            +
+        </button>
+        <button @onclick="() => _deleteMode = !_deleteMode" title="사용자 삭제"
+                class="shrink-0 w-8 h-8 flex items-center justify-center rounded border text-lg leading-none transition-colors cursor-pointer @(_deleteMode ? "border-red-400 text-red-400 bg-red-400/10" : "border-white/20 bg-white/5 hover:bg-white/10")">
+            -
+        </button>
+    </div>
+
+    @if (_users is null)
+    {
+        <p class="text-white/40 text-sm">데이터를 가져오는 중...</p>
+    }
+    else
+    {
+        var filtered = _users
+            .Where(u => u.DjName.Contains(_query, StringComparison.OrdinalIgnoreCase)
+                     || u.IidxId.Contains(_query, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (filtered.Count == 0)
+        {
+            <p class="text-white/40 text-sm">검색 결과가 없습니다.</p>
+        }
+        else
+        {
+            <div class="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                @foreach (var user in filtered)
+                {
+                    @if (_deleteMode)
+                    {
+                        <div @onclick="() => DeleteUserAsync(user)"
+                             class="flex flex-col gap-1 p-2 sm:p-4 rounded-lg border border-red-400/40 hover:border-red-400 hover:bg-red-400/5 transition-all cursor-pointer">
+                            <span class="text-xs sm:text-base font-semibold">@user.DjName</span>
+                            <span class="text-xs text-white/40 font-mono">@user.IidxId</span>
+                        </div>
+                    }
+                    else
+                    {
+                        <a href="@($"/scores?id={user.IidxId}")"
+                           class="flex flex-col gap-1 p-2 sm:p-4 rounded-lg border border-white/10 hover:border-indigo-400 hover:bg-indigo-400/5 transition-all">
+                            <span class="text-xs sm:text-base font-semibold">@user.DjName</span>
+                            <span class="text-xs text-white/40 font-mono">@user.IidxId</span>
+                        </a>
+                    }
+                }
+            </div>
+        }
+    }
+</div>
+
+@if (_showAddModal)
+{
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60" @onclick="CloseAddModal">
+        <div class="bg-zinc-900 border border-white/10 rounded-xl p-5 w-80 flex flex-col gap-4"
+             @onclick:stopPropagation="true">
+            <div class="flex justify-between items-center">
+                <span class="text-sm font-semibold">사용자 추가</span>
+                <button @onclick="CloseAddModal" class="text-white/40 hover:text-white/70 cursor-pointer">✕</button>
+            </div>
+
+            <label class="flex flex-col gap-1 text-xs text-white/50">
+                IIDX ID
+                <input type="text" inputmode="numeric" maxlength="9" value="@_newIidxId"
+                       @oninput="e => _newIidxId = e.Value?.ToString() ?? string.Empty"
+                       class="px-3 py-2 rounded border border-white/20 bg-white/5 focus:outline-none focus:border-indigo-400 font-mono text-sm" />
+            </label>
+
+            <label class="flex flex-col gap-1 text-xs text-white/50">
+                닉네임
+                <input type="text" value="@_newDjName" @oninput="e => _newDjName = e.Value?.ToString() ?? string.Empty"
+                       class="px-3 py-2 rounded border border-white/20 bg-white/5 focus:outline-none focus:border-indigo-400 text-sm" />
+            </label>
+
+            @if (_addError != null)
+            {
+                <p class="text-red-400 text-xs">@_addError</p>
+            }
+
+            <div class="flex gap-2 justify-end">
+                <button @onclick="CloseAddModal"
+                        class="px-3 py-1.5 text-sm text-white/50 hover:text-white/80 cursor-pointer">취소</button>
+                <button @onclick="AddUserAsync" disabled="@_adding"
+                        class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded text-sm transition-colors cursor-pointer">
+                    @(_adding ? "저장 중..." : "저장")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<Models.User>? _users;
+    private string _query = string.Empty;
+    private bool _deleteMode;
+
+    private bool _showAddModal;
+    private string _newIidxId = string.Empty;
+    private string _newDjName = string.Empty;
+    private string? _addError;
+    private bool _adding;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _users = await Db.Users.AsNoTracking().ToListAsync();
+    }
+
+    private void OpenAddModal()
+    {
+        _showAddModal = true;
+        _newIidxId = string.Empty;
+        _newDjName = string.Empty;
+        _addError = null;
+    }
+
+    private void CloseAddModal()
+    {
+        _showAddModal = false;
+    }
+
+    private async Task AddUserAsync()
+    {
+        var iidxId = _newIidxId.Replace("-", "").Trim();
+        var djName = _newDjName.Trim();
+
+        if (iidxId.Length != 8 || !iidxId.All(char.IsDigit))
+        {
+            _addError = "IIDX ID는 숫자 8자리여야 해요.";
+            return;
+        }
+        if (string.IsNullOrEmpty(djName))
+        {
+            _addError = "닉네임을 입력해주세요.";
+            return;
+        }
+
+        _adding = true;
+        _addError = null;
+
+        if (await Db.Users.AsNoTracking().AnyAsync(u => u.IidxId == iidxId))
+        {
+            _addError = "이미 등록된 IIDX ID예요.";
+            _adding = false;
+            return;
+        }
+
+        var user = new Models.User { IidxId = iidxId, DjName = djName };
+        Db.Users.Add(user);
+        await Db.SaveChangesAsync();
+
+        _users?.Add(user);
+        _adding = false;
+        CloseAddModal();
+    }
+
+    private async Task DeleteUserAsync(Models.User user)
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm",
+            $"{user.DjName} ({user.IidxId}) 사용자를 삭제할까요? 모든 데이터가 삭제됩니다.");
+        if (!confirmed) return;
+
+        await Db.Scores.Where(s => s.UserId == user.Id).ExecuteDeleteAsync();
+        await Db.Options.Where(o => o.UserId == user.Id).ExecuteDeleteAsync();
+        Db.Users.Remove(user);
+        await Db.SaveChangesAsync();
+
+        _users?.Remove(user);
+    }
+}

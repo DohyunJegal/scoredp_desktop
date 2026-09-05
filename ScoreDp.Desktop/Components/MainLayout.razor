@@ -1,0 +1,19 @@
+@inherits LayoutComponentBase
+
+<div class="min-h-screen flex flex-col">
+    <header class="border-b border-white/10 px-6 py-3 flex items-center gap-6">
+        <a href="/" class="font-bold text-lg tracking-tight">
+            score<span class="text-indigo-400">dp</span>
+        </a>
+        <nav class="flex gap-4 text-sm text-white/60">
+            <a href="/" class="hover:text-white transition-colors">메인</a>
+            <a href="/users" class="hover:text-white transition-colors">사용자</a>
+            <a href="/scores" class="hover:text-white transition-colors">기록</a>
+            <a href="/tier" class="hover:text-white transition-colors">서열표</a>
+            <a href="/random" class="hover:text-white transition-colors">랜덤</a>
+        </nav>
+    </header>
+    <main class="flex-1 px-6 py-8 max-w-6xl mx-auto w-full min-w-[344px]">
+        @Body
+    </main>
+</div>

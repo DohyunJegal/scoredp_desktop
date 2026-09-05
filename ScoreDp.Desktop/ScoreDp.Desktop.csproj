@@ -1,0 +1,33 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="HtmlAgilityPack" Version="1.13.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Wpf" Version="10.0.100" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
+  </ItemGroup>
+
+  <!--  Tailwind는 tools/tailwindcss.exe로 빌드마다 재생성, Razor 파일에서 실제 쓰인 클래스만 뽑아 wwwroot/css/app.css로 컴파일 -->
+  <Target Name="BuildTailwindCss" BeforeTargets="BeforeBuild">
+    <Exec Command="&quot;$(MSBuildProjectDirectory)\tools\tailwindcss.exe&quot; -i &quot;$(MSBuildProjectDirectory)\wwwroot\css\tailwind-src.css&quot; -o &quot;$(MSBuildProjectDirectory)\wwwroot\css\app.css&quot; --content &quot;$(MSBuildProjectDirectory)\Components\**\*.razor&quot; --minify" />
+  </Target>
+
+  <ItemGroup>
+    <Resource Include="Assets\app.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="App_Data\scoredp.db">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
